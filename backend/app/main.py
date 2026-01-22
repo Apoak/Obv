@@ -1,11 +1,6 @@
-from fastapi import FastAPI, Depends, HTTPException
-from sqlalchemy.orm import Session
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from . import models, schemas, crud
-from .database import engine, get_db
-
-# Create the tables (In production, use Alembic instead)
-models.Base.metadata.create_all(bind=engine)
+import schemas, crud
 
 app = FastAPI(title="Climber Map API")
 
@@ -19,6 +14,23 @@ app.add_middleware(
 )
 
 @app.get("/observations/", response_model=list[schemas.ObservationResponse])
-def read_observations(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
-    obs = crud.get_observations(db, skip=skip, limit=limit)
+def read_observations(skip: int = 0, limit: int = 100):
+    obs = crud.get_observations(skip=skip, limit=limit)
     return obs
+
+@app.get("/observations/{observation_id}", response_model=schemas.ObservationResponse)
+def read_observation(observation_id: int):
+    observation = crud.get_observation(observation_id=observation_id)
+    if observation is None:
+        raise HTTPException(status_code=404, detail="Observation not found")
+    return observation
+
+@app.post("/observations/{observation_id}/view", response_model=schemas.ObservationResponse)
+def increment_observation_views(
+    observation_id: int, 
+    request: schemas.ViewIncrementRequest
+):
+    observation = crud.increment_views(observation_id=observation_id, viewer_user_id=request.viewer_user_id)
+    if observation is None:
+        raise HTTPException(status_code=404, detail="Observation not found")
+    return observation
