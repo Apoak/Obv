@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Optional
-from jose import JWTError, jwt
-from passlib.context import CryptContext
+from jose import JWTError, jwt  # type: ignore
+from passlib.context import CryptContext  # type: ignore
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
@@ -43,6 +43,19 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
+def authenticate_user(db: Session, username: str, password: str) -> User | None:
+    """Authenticate a user by username/email and password"""
+    # Try to find user by username first
+    user = db.query(User).filter(User.username == username).first()
+    # If not found, try email
+    if not user:
+        user = db.query(User).filter(User.email == username).first()
+    if not user:
+        return None
+    if not verify_password(password, user.hashed_password):
+        return None
+    return user
 
 def get_current_user(
     token: str = Depends(oauth2_scheme),

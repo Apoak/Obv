@@ -174,7 +174,7 @@ export default function Home() {
     fetch(`${API_BASE_URL}/observations/`)
       .then(response => {
         if (!response.ok) {
-          throw new Error('Failed to fetch observations');
+          throw new Error(`API returned ${response.status}: ${response.statusText}`);
         }
         return response.json();
       })
@@ -186,10 +186,25 @@ export default function Home() {
         }));
         setAllObservations(mappedData);
         setLoading(false);
+        setError(null); // Clear any previous errors
       })
       .catch(err => {
-        console.error('Error fetching observations:', err);
-        setError(err.message);
+        // Check if it's a network/connection error (backend not running)
+        const isNetworkError = err instanceof TypeError && err.message === 'Failed to fetch';
+        
+        if (isNetworkError) {
+          // Backend is likely not running - this is expected in development
+          setError('Backend server not available - using mock data');
+          // Only log in development mode, not as an error
+          if (process.env.NODE_ENV === 'development') {
+            console.info('Backend server not available at', API_BASE_URL, '- using mock data');
+          }
+        } else {
+          // Other errors (API errors, parsing errors, etc.)
+          console.error('Error fetching observations:', err);
+          setError(`Failed to fetch observations: ${err.message}`);
+        }
+        
         // Use mock data as fallback
         setAllObservations(MOCK_OBSERVATIONS);
         setLoading(false);
