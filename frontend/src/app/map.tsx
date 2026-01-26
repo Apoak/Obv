@@ -22,8 +22,62 @@ interface ClimbingMapProps {
   onViewportChange?: (bounds: { minLng: number; minLat: number; maxLng: number; maxLat: number; zoom: number }) => void;
 }
 
+interface Cluster {
+  center: { lat: number; lng: number };
+  count: number;
+}
+
+interface Bounds {
+  minLng: number;
+  minLat: number;
+  maxLng: number;
+  maxLat: number;
+}
+
 // Minimum zoom level to show observations
 const MIN_ZOOM_LEVEL = 6;
+
+// Helper function to create clusters from observations
+function createClusters(observations: Observation[], bounds: Bounds, gridSize: number = 10): Cluster[] {
+  if (observations.length === 0) return [];
+
+  const lngRange = bounds.maxLng - bounds.minLng;
+  const latRange = bounds.maxLat - bounds.minLat;
+  const cellLng = lngRange / gridSize;
+  const cellLat = latRange / gridSize;
+
+  // Map to store clusters by grid cell (using Record to avoid conflict with imported Map component)
+  const clusterMap: Record<string, Observation[]> = {};
+
+  // Group observations by grid cell
+  observations.forEach((obs: Observation) => {
+    const cellX = Math.floor((obs.longitude - bounds.minLng) / cellLng);
+    const cellY = Math.floor((obs.latitude - bounds.minLat) / cellLat);
+    const cellKey = `${cellX},${cellY}`;
+
+    if (!clusterMap[cellKey]) {
+      clusterMap[cellKey] = [];
+    }
+    clusterMap[cellKey].push(obs);
+  });
+
+  // Convert to clusters with centers
+  const clusters: Cluster[] = [];
+  Object.entries(clusterMap).forEach(([cellKey, obsList]: [string, Observation[]]) => {
+    if (obsList.length > 0) {
+      // Calculate center as average of all observations in cluster
+      const avgLng = obsList.reduce((sum: number, obs: Observation) => sum + obs.longitude, 0) / obsList.length;
+      const avgLat = obsList.reduce((sum: number, obs: Observation) => sum + obs.latitude, 0) / obsList.length;
+
+      clusters.push({
+        center: { lat: avgLat, lng: avgLng },
+        count: obsList.length
+      });
+    }
+  });
+
+  return clusters;
+}
 
 export default function ClimbingMap({ 
   observations: initialObservations, 
@@ -37,11 +91,18 @@ export default function ClimbingMap({
   const [selectedObs, setSelectedObs] = useState<Observation | null>(null);
   // Keep observations in state so we can update them when views change
   const [observations, setObservations] = useState<Observation[]>([]);
+  // Track clusters when zoomed out
+  const [clusters, setClusters] = useState<Cluster[]>([]);
+  // Track full-screen observation
+  const [fullScreenObs, setFullScreenObs] = useState<Observation | null>(null);
   // Track current viewport
   const [viewState, setViewState] = useState<ViewState>({
     longitude: -98.5,
     latitude: 39.5,
     zoom: 3.5,
+    bearing: 0,
+    pitch: 0,
+    padding: { top: 0, bottom: 0, left: 0, right: 0 },
   });
   
   // Get actual bounds from map and filter observations
@@ -51,22 +112,6 @@ export default function ClimbingMap({
     const map = mapRef.current.getMap();
     const bounds = map.getBounds();
     const zoom = map.getZoom();
-    
-    if (zoom < MIN_ZOOM_LEVEL) {
-      setObservations([]);
-      if (onViewportChange) {
-        const ne = bounds.getNorthEast();
-        const sw = bounds.getSouthWest();
-        onViewportChange({
-          minLng: sw.lng,
-          minLat: sw.lat,
-          maxLng: ne.lng,
-          maxLat: ne.lat,
-          zoom: zoom
-        });
-      }
-      return;
-    }
     
     const ne = bounds.getNorthEast();
     const sw = bounds.getSouthWest();
@@ -91,7 +136,16 @@ export default function ClimbingMap({
       obs.latitude <= boundsObj.maxLat
     );
     
-    setObservations(filtered);
+    if (zoom < MIN_ZOOM_LEVEL) {
+      // When zoomed out, create clusters instead of showing individual markers
+      const newClusters = createClusters(filtered, boundsObj);
+      setClusters(newClusters);
+      setObservations([]);
+    } else {
+      // When zoomed in, show individual markers
+      setClusters([]);
+      setObservations(filtered);
+    }
   }, [initialObservations, onViewportChange]);
   
   // Handle viewport changes
@@ -153,6 +207,21 @@ export default function ClimbingMap({
       >
         <NavigationControl position="top-right" />
 
+        {/* Render cluster markers when zoomed out */}
+        {clusters.map((cluster, index) => (
+          <Marker 
+            key={`cluster-${index}`} 
+            longitude={cluster.center.lng} 
+            latitude={cluster.center.lat}
+            anchor="center"
+          >
+            <div className="flex items-center justify-center w-10 h-10 rounded-full bg-blue-600 text-white font-bold text-sm shadow-lg border-2 border-white">
+              {cluster.count}
+            </div>
+          </Marker>
+        ))}
+
+        {/* Render individual observation markers when zoomed in */}
         {observations.map((obs) => (
           <Marker 
             key={obs.id} 
@@ -203,10 +272,72 @@ export default function ClimbingMap({
               <p className="text-xs text-gray-400 mt-1">
                 Posted: {new Date(selectedObs.dateposted).toLocaleDateString()}
               </p>
+              <button
+                onClick={() => {
+                  setFullScreenObs(selectedObs);
+                  setSelectedObs(null);
+                }}
+                className="mt-2 w-full bg-blue-600 text-white px-3 py-1.5 rounded text-xs font-medium hover:bg-blue-700 transition-colors"
+              >
+                View Full Screen
+              </button>
             </div>
           </Popup>
         )}
       </Map>
+
+      {/* Full-screen observation modal */}
+      {fullScreenObs && (
+        <div 
+          className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-30 p-4"
+          onClick={() => setFullScreenObs(null)}
+        >
+          <div 
+            className="relative bg-white rounded-lg shadow-xl max-w-4xl w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Close button */}
+            <button
+              onClick={() => setFullScreenObs(null)}
+              className="absolute top-4 right-4 z-10 bg-white rounded-full p-2 shadow-lg hover:bg-gray-100 transition-colors"
+              aria-label="Close"
+            >
+              <svg 
+                className="w-6 h-6 text-gray-600" 
+                fill="none" 
+                stroke="currentColor" 
+                viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+
+            {/* Content */}
+            <div className="p-6">
+              {/* Image Gallery */}
+              <div className="mb-4 space-y-3">
+                {fullScreenObs.image_urls.map((imageUrl, index) => (
+                  <img 
+                    key={index}
+                    src={imageUrl} 
+                    alt={`${fullScreenObs.caption} - Image ${index + 1}`} 
+                    className="rounded-lg w-full h-auto object-cover"
+                  />
+                ))}
+              </div>
+
+              {/* Caption */}
+              <h2 className="text-2xl font-bold mb-3">{fullScreenObs.caption}</h2>
+
+              {/* Metadata */}
+              <div className="flex items-center gap-4 text-sm text-gray-600">
+                <span>Views: {fullScreenObs.views}</span>
+                <span>Posted: {new Date(fullScreenObs.dateposted).toLocaleDateString()}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
