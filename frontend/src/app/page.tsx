@@ -2,6 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import dynamic from 'next/dynamic';
+import { useAuth } from '@/contexts/AuthContext';
+import CreateObservationForm from '@/components/CreateObservationForm';
+import Link from 'next/link';
 
 // 1. Import the map dynamically with SSR disabled
 const ClimbingMap = dynamic(() => import('@/app/map'), { 
@@ -168,9 +171,10 @@ export default function Home() {
   const [allObservations, setAllObservations] = useState<Observation[]>(MOCK_OBSERVATIONS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const { user, isAuthenticated, logout } = useAuth();
 
-  // Fetch all observations from API (we'll filter by viewport in the map component)
-  useEffect(() => {
+  const fetchObservations = () => {
     fetch(`${API_BASE_URL}/observations/`)
       .then(response => {
         if (!response.ok) {
@@ -209,6 +213,11 @@ export default function Home() {
         setAllObservations(MOCK_OBSERVATIONS);
         setLoading(false);
       });
+  };
+
+  // Fetch all observations from API (we'll filter by viewport in the map component)
+  useEffect(() => {
+    fetchObservations();
   }, []);
 
   // Handle viewport changes from map (optional, for future use)
@@ -217,8 +226,7 @@ export default function Home() {
     // This callback is available for future use (e.g., fetching from API with bounds)
   };
 
-  // TODO: Replace with actual user ID from authentication
-  const currentUserId = undefined; // Set this when authentication is implemented
+  const currentUserId = user?.id;
 
   if (loading) {
     return (
@@ -232,12 +240,58 @@ export default function Home() {
   }
 
   return (
-    <main className="h-screen w-screen">
+    <main className="h-screen w-screen relative">
+      {/* Header with auth and create button */}
+      <div className="absolute top-4 right-4 z-20 flex gap-2 items-center">
+        {isAuthenticated ? (
+          <>
+            <span className="text-sm text-gray-700 bg-white px-3 py-1 rounded shadow">
+              {user?.username}
+            </span>
+            <button
+              onClick={() => setShowCreateForm(true)}
+              className="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700"
+            >
+              Create Observation
+            </button>
+            <button
+              onClick={logout}
+              className="bg-gray-600 text-white px-4 py-2 rounded shadow hover:bg-gray-700"
+            >
+              Logout
+            </button>
+          </>
+        ) : (
+          <Link
+            href="/login"
+            className="bg-blue-600 text-white px-4 py-2 rounded shadow hover:bg-blue-700"
+          >
+            Login
+          </Link>
+        )}
+      </div>
+
       {error && (
         <div className="absolute top-4 left-4 bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded z-10">
           <p className="text-sm">Using mock data: {error}</p>
         </div>
       )}
+
+      {/* Create Observation Form Modal */}
+      {showCreateForm && (
+        <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center z-30 p-4">
+          <div className="relative max-h-[90vh] overflow-y-auto">
+            <CreateObservationForm
+              onSuccess={() => {
+                setShowCreateForm(false);
+                fetchObservations();
+              }}
+              onCancel={() => setShowCreateForm(false)}
+            />
+          </div>
+        </div>
+      )}
+
       <ClimbingMap 
         observations={allObservations} 
         currentUserId={currentUserId}

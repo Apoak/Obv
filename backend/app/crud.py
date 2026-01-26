@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from geoalchemy2 import WKTElement
 from models import Observation, User
 import schemas
 from auth import get_password_hash, verify_password
@@ -37,6 +38,50 @@ def get_observation(db: Session, observation_id: int):
     if observation is None:
         return None
     
+    return _observation_to_response(db, observation)
+
+def create_observation(db: Session, observation: schemas.ObservationCreate, user_id: int):
+    """Create a new observation"""
+    # Create PostGIS POINT geometry from longitude and latitude
+    point = WKTElement(f'POINT({observation.longitude} {observation.latitude})', srid=4326)
+    
+    db_observation = Observation(
+        user_id=user_id,
+        caption=observation.caption,
+        image_urls=observation.image_urls,
+        location=point
+    )
+    db.add(db_observation)
+    db.commit()
+    db.refresh(db_observation)
+    return _observation_to_response(db, db_observation)
+
+def create_observation_with_files(db: Session, observation: schemas.ObservationCreate, user_id: int):
+    """Create a new observation with empty image_urls (to be updated after file upload)"""
+    # Create PostGIS POINT geometry from longitude and latitude
+    point = WKTElement(f'POINT({observation.longitude} {observation.latitude})', srid=4326)
+    
+    db_observation = Observation(
+        user_id=user_id,
+        caption=observation.caption,
+        image_urls=[],  # Will be populated after files are saved
+        location=point
+    )
+    db.add(db_observation)
+    db.commit()
+    db.refresh(db_observation)
+    return _observation_to_response(db, db_observation)
+
+def update_observation_image_urls(db: Session, observation_id: int, image_urls: list[str]):
+    """Update an observation's image URLs after files have been saved"""
+    observation = db.query(Observation).filter(Observation.id == observation_id).first()
+    
+    if observation is None:
+        return None
+    
+    observation.image_urls = image_urls
+    db.commit()
+    db.refresh(observation)
     return _observation_to_response(db, observation)
 
 def increment_views(db: Session, observation_id: int, viewer_user_id: int):

@@ -31,8 +31,7 @@ class TokenData(BaseModel):
 
 # Observation schemas
 class ObservationCreate(BaseModel):
-    user_id: int
-    caption: str
+    caption: str = Field(..., min_length=1, max_length=500)
     image_urls: List[str] = Field(..., min_length=1, max_length=5, description="Array of 1-5 image URLs")
     longitude: float = Field(..., ge=-180, le=180)
     latitude: float = Field(..., ge=-90, le=90)
